@@ -1,64 +1,86 @@
-# Claude + Moodle via MCP — Full Setup Guide (including SSO)
+# Claude + Moodle MCP — Setup Guide
 
-> Based on [moodle-mcp](https://github.com/1alexandrer/moodle-mcp) by [@1alexandrer](https://github.com/1alexandrer).  
-> This guide documents the full setup process including the SSO token extraction
-> workaround I figured out for schools using Microsoft/Google login.
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
+![Moodle](https://img.shields.io/badge/Moodle-4.5.8-orange.svg)
+![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)
+![moodle-mcp](https://img.shields.io/badge/moodle--mcp-0.2.0-green.svg)
+
+> A complete end-to-end guide for connecting Claude Desktop and Claude Code to your university Moodle — including a workaround for schools that use **Microsoft/Google SSO login**, where the standard token method doesn't work.
+>
+> Built on top of [moodle-mcp](https://github.com/1alexandrer/moodle-mcp) by [@1alexandrer](https://github.com/1alexandrer). All credit for the MCP server goes to them — this repo documents the full setup process and the SSO token workaround that isn't in the original README.
 
 ---
 
-## What this does
+## What you can do once connected
 
-Connects Claude Desktop (and Claude Code) directly to your university Moodle.
-You can then ask Claude things like:
+- *"What assignments do I have due this week?"*
+- *"Summarise my Derivatives course"*
+- *"What are my grades so far?"*
+- *"Build me a linked Obsidian study vault from all my course notes"*
 
-- "What assignments do I have due this week?"
-- "Summarise my Derivatives course"
-- "Build me a linked Obsidian study vault from all my course notes"
+Claude gets live access to your courses, assignments, grades, deadlines, and files — all through natural conversation.
+
+---
+
+## Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Step 1 — Get your Moodle token](#step-1--get-your-moodle-token)
+   - [Standard login](#standard-usernamepassword-login)
+   - [SSO login (Microsoft/Google)](#sso-microsoftgoogle-login--the-tricky-one)
+3. [Step 2 — Install moodle-mcp](#step-2--install-moodle-mcp)
+4. [Step 3 — Configure Claude Desktop](#step-3--configure-claude-desktop)
+5. [Step 4 — Verify the connection](#step-4--verify-the-connection)
+6. [Step 5 — Use with Claude Code](#step-5-optional--use-with-claude-code)
+7. [Bonus — Build an Obsidian study vault](#bonus--build-an-obsidian-study-vault)
+8. [Troubleshooting](#troubleshooting)
+9. [Tested on](#tested-on)
 
 ---
 
 ## Prerequisites
 
-- [Claude Desktop](https://claude.ai/download) installed
-- [Node.js](https://nodejs.org) installed — check with `node --version`
-- A university Moodle account
+| Requirement | Check |
+|---|---|
+| [Claude Desktop](https://claude.ai/download) | Installed and logged in |
+| [Node.js](https://nodejs.org) (LTS) | `node --version` → should return a version number |
+| University Moodle account | Any school running Moodle 4.x |
 
 ---
 
 ## Step 1 — Get your Moodle token
 
-### If your school uses a regular username/password login
+### Standard username/password login
 
-Go to this URL while logged into Moodle in your browser:
+Navigate to this URL while logged into Moodle in your browser:
 
 ```
 https://moodle.yourschool.edu/user/managetoken.php
 ```
 
-Copy the **Moodle mobile web service** token. Done.
+Copy the **Moodle mobile web service** token and skip to [Step 2](#step-2--install-moodle-mcp).
 
 ---
 
-### If your school uses SSO (Microsoft/Google login) ← the tricky one
+### SSO (Microsoft/Google) login — the tricky one
 
-The standard token page won't show the mobile web service token for SSO schools.
-The Moodle app "tap version number 5 times" trick also doesn't work on newer app versions.
+If your school uses SSO, the token page only shows an RSS token — not the one you need. The Moodle app "tap the version number 5 times" trick also no longer works on newer app versions.
 
-Here's what actually works:
+Here's the method that actually works:
 
-**1.** Make sure you're logged into Moodle in **Safari** on your Mac.
+**1. Log into Moodle in Safari** on your Mac (must be Safari, not Chrome/Firefox).
 
-**2.** Open this URL in Safari (swap in your school's Moodle domain):
+**2. Open this URL** — swap in your school's Moodle domain:
 
 ```
 https://moodle.yourschool.edu/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=moodlemobile
 ```
 
-**3.** Safari will try to open a `moodlemobile://` URL and fail — a blank or "Untitled" tab will appear. Click the **address bar** of that tab. It will show a long URL starting with `moodlemobile://token=...`
+**3.** Safari will try (and fail) to open a `moodlemobile://` URL. A blank "Untitled" tab will appear. **Click the address bar of that tab** — it shows a long URL starting with `moodlemobile://token=...`
 
-**4.** Select all and copy the full URL.
+**4.** Select all (`Cmd+A`) and copy the full URL.
 
-**5.** Grab just the base64 string after `token=` (everything up to and including the `==`).
+**5.** Extract the base64 string — it's everything after `token=`, including the trailing `==`.
 
 **6.** Decode it in Terminal:
 
@@ -66,42 +88,50 @@ https://moodle.yourschool.edu/admin/tool/mobile/launch.php?service=moodle_mobile
 echo "YOUR_BASE64_STRING==" | base64 --decode
 ```
 
-The output looks like:
+Output will look like:
 
 ```
 abc123:::dc4e68b94090f96b619adee1b07e658b
 ```
 
-Your token is the part **after** `:::`.
+> Your token is the part **after** `:::` — ignore everything before it.
 
-**7.** Verify it works:
+**7.** Verify the token works:
 
 ```bash
 curl "https://moodle.yourschool.edu/webservice/rest/server.php?wstoken=YOUR_TOKEN&wsfunction=core_webservice_get_site_info&moodlewsrestformat=json"
 ```
 
-If it returns your name and site info, the token is valid.
+A successful response returns your name, username, and site info as JSON. If you see that, your token is valid.
 
 ---
 
-## Step 2 — Install moodle-mcp globally
+## Step 2 — Install moodle-mcp
+
+Install the package globally so Claude Desktop can find it without needing to fetch it on every start:
 
 ```bash
 npm install -g moodle-mcp
-which moodle-mcp   # note the path, e.g. /opt/anaconda3/bin/moodle-mcp
+```
+
+Then note the full path — you'll need this in the next step:
+
+```bash
+which moodle-mcp
+# e.g. /opt/anaconda3/bin/moodle-mcp
 ```
 
 ---
 
 ## Step 3 — Configure Claude Desktop
 
-Open the config file:
+Open the Claude Desktop config file:
 
 ```bash
 open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
 
-Add the `mcpServers` block. Use the **full path** from `which moodle-mcp`:
+Merge in the `mcpServers` block below. **Use the full path** from `which moodle-mcp` — do not just write `moodle-mcp` or `npx`:
 
 ```json
 {
@@ -118,25 +148,21 @@ Add the `mcpServers` block. Use the **full path** from `which moodle-mcp`:
 }
 ```
 
-Save, then fully quit Claude Desktop (`Cmd+Q`) and reopen it.
-
-> **Why the full path?** Claude Desktop doesn't inherit your shell's PATH, so
-> `npx` or `moodle-mcp` alone won't resolve if Node is installed via Anaconda
-> or any non-standard location.
+Save the file (`Cmd+S`), then **fully quit** Claude Desktop (`Cmd+Q`) and reopen it.
 
 ---
 
 ## Step 4 — Verify the connection
 
-In Claude Desktop, click the **+** button in the chat input → **Connectors** → confirm Moodle is toggled on.
+In a new Claude Desktop chat, click the **+** button in the input box → **Connectors** → confirm Moodle shows a blue toggle.
 
-Try asking: *"What courses am I enrolled in?"*
+Test it by asking: *"What courses am I enrolled in?"*
 
 ---
 
 ## Step 5 (optional) — Use with Claude Code
 
-To use Moodle tools in the Claude Code CLI:
+To use the same Moodle tools inside the Claude Code CLI, run this once:
 
 ```bash
 claude mcp add moodle /opt/anaconda3/bin/moodle-mcp \
@@ -144,13 +170,13 @@ claude mcp add moodle /opt/anaconda3/bin/moodle-mcp \
   -e MOODLE_TOKEN=your_token_here
 ```
 
-Restart Claude Code after running this.
+Restart Claude Code for the change to take effect.
 
 ---
 
-## Building an Obsidian study vault
+## Bonus — Build an Obsidian study vault
 
-Once connected, run Claude Code in your terminal and ask:
+With Claude Code running locally, you can pull all your course materials and have them written as a fully linked [Obsidian](https://obsidian.md) vault directly to your machine:
 
 ```
 Pull all my Moodle courses and build a linked Obsidian vault at
@@ -158,8 +184,27 @@ Pull all my Moodle courses and build a linked Obsidian vault at
 between related concepts, a MOC.md index, and tags for each section.
 ```
 
-> Use **Claude Code** (not Claude Desktop chat) for this — it can write files
-> directly to your filesystem. Claude Desktop chat runs in a sandbox and cannot.
+> **Important:** Use **Claude Code** (not Claude Desktop chat) for this. Claude Desktop runs in a sandbox and cannot write to your local filesystem. Claude Code runs natively on your machine and writes files directly.
+
+---
+
+## Troubleshooting
+
+**"Server disconnected" in Claude Desktop**
+
+Claude Desktop doesn't inherit your shell's `PATH`, so commands like `npx` or `moodle-mcp` won't resolve if Node is installed via Anaconda or a non-standard path. Always use the **absolute path** from `which moodle-mcp`.
+
+**Token page only shows RSS token**
+
+Your school's mobile web service token isn't exposed on the standard token page. Use the [SSO method above](#sso-microsoftgoogle-login--the-tricky-one) to extract it via the browser redirect.
+
+**`fetch failed` error in MCP logs**
+
+This usually means the token is being rejected. Verify it with the `curl` command in Step 1 before adding it to the config.
+
+**Hammer/tools icon not showing in Claude Desktop**
+
+It's hidden behind the **+** button in the input box → click **Connectors**.
 
 ---
 
@@ -170,15 +215,14 @@ between related concepts, a MOC.md index, and tags for each section.
 | **School** | City St George's, University of London (`moodle4.city.ac.uk`) |
 | **Login** | Microsoft SSO |
 | **OS** | macOS (Apple Silicon) |
-| **Moodle version** | 4.5.8 |
+| **Moodle version** | 4.5.8 (Build 20251208) |
 | **moodle-mcp version** | 0.2.0 |
+| **Node.js version** | v22.6.0 |
 
 ---
 
 ## Credit
 
-All credit for the MCP server goes to [@1alexandrer](https://github.com/1alexandrer) —
-[github.com/1alexandrer/moodle-mcp](https://github.com/1alexandrer/moodle-mcp).
+All credit for the MCP server goes to [@1alexandrer](https://github.com/1alexandrer) — [github.com/1alexandrer/moodle-mcp](https://github.com/1alexandrer/moodle-mcp).
 
-This repo just documents the full end-to-end setup and the SSO token workaround
-that isn't covered in the original README.
+This guide documents the full end-to-end setup and the SSO workaround discovered while setting it up at City St George's, University of London.
