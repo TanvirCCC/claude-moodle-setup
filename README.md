@@ -88,13 +88,21 @@ https://moodle.yourschool.edu/admin/tool/mobile/launch.php?service=moodle_mobile
 echo "YOUR_BASE64_STRING==" | base64 --decode
 ```
 
-Output will look like:
+The output is colon-separated. Depending on your Moodle version it has **two or three** fields:
 
 ```
-abc123:::REDACTED-TOKEN
+# two-field format (older Moodle):
+<signature>:::<token>
+
+# three-field format (newer Moodle — this is what City St George's returns):
+<signature>:::<token>:::<privatetoken>
 ```
 
-> Your token is the part **after** `:::` — ignore everything before it.
+> **Your web service token is the _middle_ field** — the value between the first and second `:::`.
+> - The **first** field is a passport signature, not a token.
+> - The optional **third** field is a "private token" used only for the Moodle mobile app's auto-login — you don't need it here.
+>
+> ⚠️ Don't just copy "everything after `:::`". If you get three fields there are two separators, and the **last** field is the wrong one. Take the field in the middle.
 
 **7.** Verify the token works:
 
@@ -103,6 +111,11 @@ curl "https://moodle.yourschool.edu/webservice/rest/server.php?wstoken=YOUR_TOKE
 ```
 
 A successful response returns your name, username, and site info as JSON. If you see that, your token is valid.
+
+> 🔒 **Treat this token like a password.** It grants full access to your Moodle account — your courses, grades, personal details, and messages. Anyone who has it can act as you.
+> - Never commit it to a public repo, paste it into a chat, or share a screenshot of it.
+> - If it's ever exposed, generate a fresh one by repeating the SSO steps above — doing so invalidates the previous token.
+> - The `your_token_here` placeholders in the config examples below are intentional. Put your real token only in your local config files, never anywhere public.
 
 ---
 
