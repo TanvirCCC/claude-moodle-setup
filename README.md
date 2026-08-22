@@ -127,12 +127,17 @@ Install the package globally so Claude Desktop can find it without needing to fe
 npm install -g moodle-mcp
 ```
 
-Then note the full path — you'll need this in the next step:
+Then grab the two paths you'll need in the next step — the absolute path to `node`, and the absolute path to the server script:
 
 ```bash
-which moodle-mcp
-# e.g. /opt/anaconda3/bin/moodle-mcp
+which node
+# e.g. /opt/anaconda3/bin/node
+
+echo "$(npm root -g)/moodle-mcp/dist/server.js"
+# e.g. /opt/anaconda3/lib/node_modules/moodle-mcp/dist/server.js
 ```
+
+> **Why not just point Claude at `moodle-mcp` directly?** The `moodle-mcp` command is a small wrapper whose first line is `#!/usr/bin/env node` — meaning "find `node` on the PATH." Claude Desktop launches MCP servers with a **minimal PATH** that often does *not* include your Node install directory (very common with Anaconda/nvm). When that happens the wrapper can't find `node`, exits instantly, and Claude reports **"Server disconnected."** Pointing the config straight at the `node` binary with the script as an argument sidesteps the PATH lookup entirely and is far more robust. See [Troubleshooting](#troubleshooting).
 
 ---
 
@@ -144,14 +149,16 @@ Open the Claude Desktop config file:
 open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
 
-Merge in the `mcpServers` block below. **Use the full path** from `which moodle-mcp` — do not just write `moodle-mcp` or `npx`:
+Merge in the `mcpServers` block below. Set `command` to your absolute **node** path and put the **server.js** path in `args` — use the two values you got from Step 2. Do not write `moodle-mcp`, `npx`, or a bare `node`:
 
 ```json
 {
   "mcpServers": {
     "moodle": {
-      "command": "/opt/anaconda3/bin/moodle-mcp",
-      "args": [],
+      "command": "/opt/anaconda3/bin/node",
+      "args": [
+        "/opt/anaconda3/lib/node_modules/moodle-mcp/dist/server.js"
+      ],
       "env": {
         "MOODLE_URL": "https://moodle.yourschool.edu",
         "MOODLE_TOKEN": "your_token_here"
@@ -161,7 +168,9 @@ Merge in the `mcpServers` block below. **Use the full path** from `which moodle-
 }
 ```
 
-Save the file (`Cmd+S`), then **fully quit** Claude Desktop (`Cmd+Q`) and reopen it.
+> **Older guides (and the original README) tell you to set `command` to the `moodle-mcp` wrapper directly.** That works *only if* Claude Desktop happens to see `node` on its PATH — which frequently it doesn't. The node + `server.js` form above is the reliable version and is what fixed a stubborn "Server disconnected" loop on a fresh install. If you'd rather try the shorter form first, it's `"command": "/opt/anaconda3/bin/moodle-mcp", "args": []` — just switch to the form above the moment you see "Server disconnected."
+
+Save the file (`Cmd+S`), then **fully quit** Claude Desktop (`Cmd+Q`, not just closing the window) and reopen it.
 
 ---
 
@@ -175,10 +184,11 @@ Test it by asking: *"What courses am I enrolled in?"*
 
 ## Step 5 (optional) — Use with Claude Code
 
-To use the same Moodle tools inside the Claude Code CLI, run this once:
+To use the same Moodle tools inside the Claude Code CLI, run this once (same node + `server.js` form as Step 3):
 
 ```bash
-claude mcp add moodle /opt/anaconda3/bin/moodle-mcp \
+claude mcp add moodle /opt/anaconda3/bin/node \
+  "$(npm root -g)/moodle-mcp/dist/server.js" \
   -e MOODLE_URL=https://moodle.yourschool.edu \
   -e MOODLE_TOKEN=your_token_here
 ```
@@ -203,9 +213,28 @@ between related concepts, a MOC.md index, and tags for each section.
 
 ## Troubleshooting
 
-**"Server disconnected" in Claude Desktop**
+**"Server disconnected" in Claude Desktop** *(the most common issue)*
 
-Claude Desktop doesn't inherit your shell's `PATH`, so commands like `npx` or `moodle-mcp` won't resolve if Node is installed via Anaconda or a non-standard path. Always use the **absolute path** from `which moodle-mcp`.
+This almost always means the server process crashed on launch — **not** a token problem. The usual cause: Claude Desktop launches MCP servers with a minimal `PATH`, and the `moodle-mcp` wrapper's shebang (`#!/usr/bin/env node`) can't find `node` on it, so it exits before it can even talk to Moodle.
+
+The fix is the config form in [Step 3](#step-3--configure-claude-desktop): set `command` to your absolute `node` path and pass `.../moodle-mcp/dist/server.js` in `args`. This skips the PATH lookup entirely.
+
+To confirm this is what's happening, run the wrapper under a stripped-down PATH — if you see `env: node: No such file or directory`, that's it:
+
+```bash
+env -i PATH="/usr/bin:/bin" $(which moodle-mcp) </dev/null
+```
+
+Then verify the node + script form starts cleanly (it should sit and wait for input rather than exit):
+
+```bash
+env -i PATH="/usr/bin:/bin" $(which node) "$(npm root -g)/moodle-mcp/dist/server.js"
+# Press Ctrl+C to stop — no error output means it's healthy.
+```
+
+The **View Logs** button under the server entry in Claude Desktop's MCP settings shows the exact error if you need to dig deeper.
+
+> **Tip:** If the token is genuinely expired you'll see `invalidtoken` in the logs (not "Server disconnected") — regenerate it via [Step 1](#step-1--get-your-moodle-token). SSO Moodle tokens expire periodically, so this is normal maintenance, not a broken setup.
 
 **Token page only shows RSS token**
 
