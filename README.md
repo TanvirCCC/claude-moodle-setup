@@ -1,7 +1,7 @@
 # Claude + Moodle MCP — Setup Guide
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Moodle](https://img.shields.io/badge/Moodle-4.5.8-orange.svg)
+![Moodle](https://img.shields.io/badge/Moodle-4.5.13-orange.svg)
 ![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)
 ![moodle-mcp](https://img.shields.io/badge/moodle--mcp-0.2.0-green.svg)
 
@@ -34,7 +34,8 @@ Claude gets live access to your courses, assignments, grades, deadlines, and fil
 6. [Step 5 — Use with Claude Code](#step-5-optional--use-with-claude-code)
 7. [Bonus — Build an Obsidian study vault](#bonus--build-an-obsidian-study-vault)
 8. [Troubleshooting](#troubleshooting)
-9. [Tested on](#tested-on)
+9. [Renewing an expired token](#renewing-an-expired-token)
+10. [Tested on](#tested-on)
 
 ---
 
@@ -68,19 +69,31 @@ If your school uses SSO, the token page only shows an RSS token — not the one 
 
 Here's the method that actually works:
 
-**1. Log into Moodle in Safari** on your Mac (must be Safari, not Chrome/Firefox).
+**1. Log into Moodle in Safari** on your Mac (must be Safari, not Chrome/Firefox) and stay on your dashboard (`/my/`).
 
-**2. Open this URL** — swap in your school's Moodle domain:
+**2. Open the Web Inspector console:** `Cmd+Option+I` → **Console** tab.
+If nothing opens, first enable it: **Safari → Settings → Advanced → tick "Show features for web developers"**.
+
+**3. Paste this into the console** (swap in your school's Moodle domain) and press Enter:
+
+```javascript
+fetch("https://moodle.yourschool.edu/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=moodlemobile").then(r => console.log(r.url))
+```
+
+**4. Find the token in the console output.** The fetch itself fails with red errors (`Redirect was not allowed`, `Load failed`). **That's expected — ignore them.** Just above them is a yellow warning like this:
 
 ```
-https://moodle.yourschool.edu/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=12345&urlscheme=moodlemobile
+[Warning] [blocked] The page at https://moodle.yourschool.edu/my/ requested insecure content
+from moodlemobile://token=XXXXXXXXXXXXXXXX==. This content was blocked and must be served over HTTPS.
 ```
 
-**3.** Safari will try (and fail) to open a `moodlemobile://` URL. A blank "Untitled" tab will appear. **Click the address bar of that tab** — it shows a long URL starting with `moodlemobile://token=...`
+The `moodlemobile://token=…` in that line is what you need. Copy it, or copy the whole line. ([`renew-token.sh`](#renewing-an-expired-token) can pull the token out of the full line for you.)
 
-**4.** Select all (`Cmd+A`) and copy the full URL.
+> **Why this works:** Moodle answers with a redirect to `moodlemobile://token=…`. Safari won't let a page follow a non-HTTPS redirect, but it logs the URL it blocked, including the token.
+>
+> **The old address-bar method no longer works reliably.** Opening the `launch.php` URL directly in the address bar used to leave an "Untitled" tab showing the `moodlemobile://` URL. Current Safari shows *"Safari cannot open the page because the address is invalid"*, and the address bar shows only the domain, so the token is lost. Use the console method.
 
-**5.** Extract the base64 string — it's everything after `token=`, including the trailing `==`.
+**5.** Extract the base64 string. It's everything after `token=`, including the trailing `==`, but **not** the full stop from the console message.
 
 **6.** Decode it in Terminal:
 
@@ -213,9 +226,31 @@ between related concepts, a MOC.md index, and tags for each section.
 
 ## Troubleshooting
 
-**"Server disconnected" in Claude Desktop** *(the most common issue)*
+**First, run the diagnostic.** It checks your config paths, tests the token and shows the server log, without printing the token:
 
-This almost always means the server process crashed on launch — **not** a token problem. The usual cause: Claude Desktop launches MCP servers with a minimal `PATH`, and the `moodle-mcp` wrapper's shebang (`#!/usr/bin/env node`) can't find `node` on it, so it exits before it can even talk to Moodle.
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/TanvirCCC/claude-moodle-setup/main/diagnose.sh)
+```
+
+**Moodle worked for weeks, then the tools disappeared ("Connection closed" / "Server disconnected")**
+
+**Your token has expired.** This happened to me about three months after setup, with no config changes. The symptoms:
+
+- The Moodle tools vanish from Claude, and Claude Desktop shows the server as *retrying, attempt 3 of 3*, with the error **`Connection closed`**.
+- The server log (`~/Library/Logs/Claude/mcp-server-moodle.log`) repeats:
+  ```
+  [moodle] [error] Couldn't start ... Error: Connection closed
+  Failed to start moodle-mcp: Invalid Moodle token. Check your MOODLE_TOKEN value.
+  ```
+- Testing the token with `curl` returns `"errorcode":"invalidtoken"`, `"Invalid token - token not found"`.
+
+**Why it looks like a crash:** `moodle-mcp` checks the token as it starts and exits immediately if Moodle rejects it. Claude only sees the process die, so it reports "Connection closed", the same symptom as the PATH crash below. Claude retries 3 times, then drops the tools from the session. **The log line is what tells the two problems apart.**
+
+**Fix:** follow [Renewing an expired token](#renewing-an-expired-token). The node and `server.js` paths don't need changing.
+
+**"Server disconnected" on a fresh install**
+
+On a new setup this usually means the server process crashed on launch, **not** a token problem. The usual cause: Claude Desktop launches MCP servers with a minimal `PATH`, and the `moodle-mcp` wrapper's shebang (`#!/usr/bin/env node`) can't find `node` on it, so it exits before it can even talk to Moodle.
 
 The fix is the config form in [Step 3](#step-3--configure-claude-desktop): set `command` to your absolute `node` path and pass `.../moodle-mcp/dist/server.js` in `args`. This skips the PATH lookup entirely.
 
@@ -234,7 +269,7 @@ env -i PATH="/usr/bin:/bin" $(which node) "$(npm root -g)/moodle-mcp/dist/server
 
 The **View Logs** button under the server entry in Claude Desktop's MCP settings shows the exact error if you need to dig deeper.
 
-> **Tip:** If the token is genuinely expired you'll see `invalidtoken` in the logs (not "Server disconnected") — regenerate it via [Step 1](#step-1--get-your-moodle-token). SSO Moodle tokens expire periodically, so this is normal maintenance, not a broken setup.
+> **Tip:** Before changing paths, check the log. If it says `Invalid Moodle token`, the paths are fine and the token has expired (see above). If an Anaconda or Node update moves `node` or the global `node_modules`, the diagnostic shows `No such file or directory` for the paths in your config. Redo Steps 2–3 with the new paths.
 
 **Token page only shows RSS token**
 
@@ -248,6 +283,53 @@ This usually means the token is being rejected. Verify it with the `curl` comman
 
 It's hidden behind the **+** button in the input box → click **Connectors**.
 
+**`SyntaxError` in Safari, or `zsh: parse error` in Terminal**
+
+The two parts of the renewal go in different places, and they're easy to mix up:
+
+| What | Where it runs |
+|---|---|
+| The `fetch(...)` line | **Safari** Web Inspector → Console |
+| `renew-token.sh`, `diagnose.sh`, `curl`, `base64` | **Terminal** |
+
+Shell commands pasted into the Safari console give `SyntaxError: Unexpected identifier`. Console output pasted into Terminal along with a command gives `zsh: parse error`. In both cases nothing has run and nothing has changed. Paste only the command, in the right app.
+
+---
+
+## Renewing an expired token
+
+SSO Moodle tokens expire. Expect to do this every few months. This is routine maintenance, and your setup isn't broken.
+
+**1. Get a fresh `moodlemobile://token=…` URL** with the [Safari console method](#sso-microsoftgoogle-login--the-tricky-one) (Step 1, points 1–4). Copy the console warning line.
+
+**2. Run the renewal script in Terminal:**
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/TanvirCCC/claude-moodle-setup/main/renew-token.sh)
+```
+
+Paste the line when it asks, or just press Enter to use your clipboard. The script:
+
+- decodes the token (the middle `:::` field)
+- tests it against Moodle and **changes nothing if Moodle rejects it**
+- swaps it into Claude Desktop's config, keeping a backup as `claude_desktop_config.json.bak`
+- updates Claude Code's `~/.claude.json` too, if it holds the same old token
+- never prints the token
+
+[Read the script](renew-token.sh) before running it if you like. It's short.
+
+**3. Fully quit Claude (`Cmd+Q`) and reopen it.** The config is only read at startup, so the server stays in its failed state until you restart. After restarting, ask *"What courses am I enrolled in?"* to confirm.
+
+<details>
+<summary>Doing it by hand instead</summary>
+
+1. Decode the base64 string and take the middle field ([Step 1](#sso-microsoftgoogle-login--the-tricky-one), points 5–6).
+2. Verify it with the `curl` in point 7.
+3. Open the config (`open -e ~/Library/Application\ Support/Claude/claude_desktop_config.json`), replace the `MOODLE_TOKEN` value, save, and press `Cmd+Q` on Claude.
+4. For Claude Code: `claude mcp remove moodle`, then redo [Step 5](#step-5-optional--use-with-claude-code) with the new token.
+
+</details>
+
 ---
 
 ## Tested on
@@ -257,7 +339,8 @@ It's hidden behind the **+** button in the input box → click **Connectors**.
 | **School** | City St George's, University of London (`moodle4.city.ac.uk`) |
 | **Login** | Microsoft SSO |
 | **OS** | macOS (Apple Silicon) |
-| **Moodle version** | 4.5.8 (Build 20251208) |
+| **Moodle version** | 4.5.13 (Build 20260810), originally set up on 4.5.8 |
+| **Last verified** | 16 November 2026 (token renewal after expiry) |
 | **moodle-mcp version** | 0.2.0 |
 | **Node.js version** | v22.6.0 |
 
